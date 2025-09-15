@@ -1,8 +1,8 @@
 # 3D_VMRNN_dynamic
-# Overview  
+## Overview  
 We propose model architecture based on a modified 3D-Geoformer with an encoder–decoder structure, integrating VMRNN, residual correction, and dynamic activation system. The input is 12 consecutive months of multivariable climate fields (τₓ, τᵧ wind stress and seven-layer ocean temperature anomalies, 9 channels total). The encoder extracts spatial features and converts them into sequences for VMRNN to capture long-term dependencies, while the decoder outputs 20-month predictions. The climate-aware dynamic activation system, which adaptively selects between ReLU and Learned Snake functions depending on ENSO states.  
 ![](https://github.com/Wuwenchie/3D_VMRNN_dynamic/blob/main/figure1.png)  
-# Installation  
+## Installation  
     conda env create -f environment.yml
     conda activate 3D_VMRNN
     pip install -e .
@@ -12,9 +12,9 @@ We propose model architecture based on a modified 3D-Geoformer with an encoder�
     pip install mlflow
     pip install causal_conv1d==1.1.1
     pip install mamba_ssm==1.1.1  
-# Training
+### Training
     cd code
     python trainer.py
-# Testing
+### Testing
     cd code
     python test_model.py
