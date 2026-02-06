@@ -49,7 +49,7 @@ class PhysicalLatentGating(nn.Module):
         self.activations = nn.ModuleList([
             nn.ReLU(inplace=True),      # 线性区域适用
             LearnedSnake(in_features=1), # 非线性较强区域
-            nn.GELU()                    # 平滑非线性
+            # nn.GELU()                    # 平滑非线性
         ])
         
         # 门控网络：从隐状态学习物理背景特征
@@ -131,10 +131,10 @@ class ActivationFactory:
             return AdaptiveSnake(in_features=params.get('in_features', hidden_dim))
         elif activation_type == 'dynamic':
             # 使用基于物理潜在特征的门控
-            return PhysicalLatentGating(hidden_dim=hidden_dim, num_activations=3)
+            return PhysicalLatentGating(hidden_dim=hidden_dim, num_activations=2)
         elif activation_type == 'physical_gating':
             # 显式指定物理门控
-            num_act = params.get('num_activations', 3)
+            num_act = params.get('num_activations', 2)
             return PhysicalLatentGating(hidden_dim=hidden_dim, num_activations=num_act)
         else:
             return nn.ReLU(inplace=True)
@@ -401,7 +401,7 @@ class GeoVMRNN_Enhance(nn.Module):
             # hidden_dim 应该是 latent_context 的维度（self.embed_dim），而不是融合层输出维度
             self.fusion_activation = PhysicalLatentGating(
                 hidden_dim=self.embed_dim,  # 256，与 VMRNN 隐状态维度一致
-                num_activations=3
+                num_activations=2
             )
             self.use_dynamic_activation = True
             print(f"使用基於物理潜在特征的門控激活函数 (latent_dim={self.embed_dim})")
