@@ -1,6 +1,4 @@
-# 修改 train_ablation.py 文件，添加内存优化
-from GeoVMRNN_latent_based import create_supervised_geo_vmrnn, get_ablation_configs
-# from GeoVMRNN_resnet import create_resnet_geo_vmrnn, get_ablation_configs
+from 3D_VMRNN_latent_based import create_supervised_geo_vmrnn, get_ablation_configs
 from DynamicActivationSelector import DynamicActivationLoss
 from myconfig import mypara
 import torch
