@@ -1,4 +1,6 @@
-from 3D_VMRNN_latent_based import create_supervised_geo_vmrnn, get_ablation_configs
+# 修改 train_ablation.py 文件，添加内存优化
+from GeoVMRNN_latent_based import create_supervised_geo_vmrnn, get_ablation_configs
+# from GeoVMRNN_resnet import create_resnet_geo_vmrnn, get_ablation_configs
 from DynamicActivationSelector import DynamicActivationLoss
 from myconfig import mypara
 import torch
@@ -443,114 +445,109 @@ class DynamicActivationTrainer:
         nino_true = []
         var_true = []
         activation_weights_list = []
-        sample_indices = []  # 记录样本索引
+        sample_indices = []
         current_sample_idx = 0
-
+        
         with torch.no_grad():
             for input_var, var_true1 in dataloader:
+                # 清空当前批次的权重历史（避免累积）
+                if hasattr(self.mymodel, 'fusion_activation') and hasattr(self.mymodel.fusion_activation, 'weights_history'):
+                    self.mymodel.fusion_activation.weights_history = []
+                
                 # 提取真實 SST 和 Nino 指數
                 SST = var_true1[:, :, self.sstlevel]
                 nino_true1 = SST[
                     :,
                     :,
-                    self.mypara.lat_nino_relative[0]: self.mypara.lat_nino_relative[1],
-                    self.mypara.lon_nino_relative[0]: self.mypara.lon_nino_relative[1],
+                    self.mypara.lat_nino_relative[0] : self.mypara.lat_nino_relative[1],
+                    self.mypara.lon_nino_relative[0] : self.mypara.lon_nino_relative[1],
                 ].mean(dim=[2, 3])
-
+                
                 # 模型預測
                 out_var, residual_loss = self.mymodel(
                     input_var.float().to(self.device),
                     predictand=None,
                     train=False,
                 )
-
+                
                 # 提取預測的 SST 和 Nino 指數
                 SST_out = out_var[:, :, self.sstlevel]
                 out_nino = SST_out[
                     :,
                     :,
-                    self.mypara.lat_nino_relative[0]: self.mypara.lat_nino_relative[1],
-                    self.mypara.lon_nino_relative[0]: self.mypara.lon_nino_relative[1],
+                    self.mypara.lat_nino_relative[0] : self.mypara.lat_nino_relative[1],
+                    self.mypara.lon_nino_relative[0] : self.mypara.lon_nino_relative[1],
                 ].mean(dim=[2, 3])
-
+                
                 # 收集預測和真實值
                 var_true.append(var_true1.cpu())
                 nino_true.append(nino_true1.cpu())
                 var_pred.append(out_var.cpu())
                 nino_pred.append(out_nino.cpu())
-
-                # 收集激活函數權重和样本索引
+                
+                # 收集激活函數權重
                 if hasattr(self.mymodel, 'fusion_activation') and hasattr(self.mymodel.fusion_activation, 'weights_history'):
-                    # 获取这个批次产生的权重数量
-                    batch_size = input_var.size(0)
-                    output_length = self.mymodel.mypara.output_length
-                    expected_weights = batch_size * output_length
-
-                    if len(self.mymodel.fusion_activation.weights_history) >= expected_weights:
-                        # 获取最近的权重
-                        recent_weights = self.mymodel.fusion_activation.weights_history[-expected_weights:]
-                        for w in recent_weights:
-                            activation_weights_list.append(w.detach().cpu())
+                    # weights_history 包含了这个批次所有时间步的权重
+                    for weights in self.mymodel.fusion_activation.weights_history:
+                        # weights 形状: [current_batch_size, num_activations]
+                        for b in range(weights.size(0)):
+                            activation_weights_list.append(weights[b].detach().cpu())  # [num_activations]
                             sample_indices.append(current_sample_idx)
                             current_sample_idx += 1
-
+                
                 # 每处理几个批次后清理内存
                 if len(var_pred) % 5 == 0:
                     torch.cuda.empty_cache()
-
+            
             # 拼接所有批次的結果
             var_pred = torch.cat(var_pred, dim=0)
             nino_pred = torch.cat(nino_pred, dim=0)
             nino_true = torch.cat(nino_true, dim=0)
             var_true = torch.cat(var_true, dim=0)
-
+            
             # 将数据移回GPU进行计算
             var_pred_gpu = var_pred.to(self.device)
             nino_pred_gpu = nino_pred.to(self.device)
             nino_true_gpu = nino_true.to(self.device)
             var_true_gpu = var_true.to(self.device)
-
+            
             # 計算評估指標
             ninosc = self.calscore(nino_pred_gpu, nino_true_gpu)
-            loss_var = self.loss_var(
-                var_pred_gpu, var_true_gpu, residual_losses=None).item()
+            loss_var = self.loss_var(var_pred_gpu, var_true_gpu, residual_losses=None).item()
             loss_nino = self.loss_nino(nino_pred_gpu, nino_true_gpu).item()
             combine_loss = self.combine_loss(loss_var, loss_nino)
-
+            
             # 计算完成后释放GPU内存
             del var_pred_gpu, nino_pred_gpu, nino_true_gpu, var_true_gpu
             torch.cuda.empty_cache()
-
+            
             # 計算平均激活函數權重并保存详细记录
             activation_weights = None
             if activation_weights_list:
-                activation_weights = torch.stack(
-                    activation_weights_list).mean(dim=0).numpy()
-
+                # 现在所有元素都是 [num_activations] 形状，可以安全地 stack
+                activation_weights = torch.stack(activation_weights_list).mean(dim=0).numpy()
+                
                 # 保存详细的权重记录（用于物理分析）
                 if save_weights and epoch is not None:
-                    weights_array = torch.stack(
-                        activation_weights_list).numpy()
-                    save_path = os.path.join(
-                        self.mypara.model_savepath, 'activation_weights')
+                    weights_array = torch.stack(activation_weights_list).numpy()  # [N_samples, num_activations]
+                    save_path = os.path.join(self.mypara.model_savepath, 'activation_weights')
                     os.makedirs(save_path, exist_ok=True)
-
+                    
                     # 保存权重数组
                     np.save(
                         os.path.join(save_path, f'weights_epoch_{epoch}.npy'),
                         weights_array
                     )
-
+                    
                     # 保存样本索引
                     np.save(
-                        os.path.join(
-                            save_path, f'sample_indices_epoch_{epoch}.npy'),
+                        os.path.join(save_path, f'sample_indices_epoch_{epoch}.npy'),
                         np.array(sample_indices)
                     )
-
-                    print(f"\n已保存激活函數權重: {save_path}/weights_epoch_{epoch}.npy")
-                    print(f"權重數组形状: {weights_array.shape} [樣本數 x 激活函數數量]")
-
+                    
+                    print(f"\n已保存激活函数权重: {save_path}/weights_epoch_{epoch}.npy")
+                    print(f"权重数组形状: {weights_array.shape} [样本数 x 激活函数数量]")
+        
         return {
             'var_pred': var_pred,
             'nino_pred': nino_pred,
